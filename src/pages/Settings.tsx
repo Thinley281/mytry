@@ -1,10 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient'; // Ensure this path matches your file structure
 
 const Settings = () => {
   const navigate = useNavigate();
 
-  // State Management
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -16,43 +16,107 @@ const Settings = () => {
   });
   
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState(false);
 
-  const handleSave = (e: FormEvent) => {
+  // --- 1. LOAD DATA FROM SUPABASE ---
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
+          if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "no rows found"
+
+          if (data) {
+            setFormData(prev => ({
+              ...prev,
+              firstName: data.first_name || '',
+              lastName: data.last_name || '',
+              age: data.age?.toString() || '',
+              cid: data.cid || ''
+            }));
+          }
+        }
+      } catch (err: any) {
+        console.error("Error loading profile:", err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, []);
+
+  const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess(false);
 
-    // 1. CID Validation: Exactly 13 digits, numeric only
+    // --- 2. VALIDATIONS ---
     const cidRegex = /^\d{13}$/;
     if (!cidRegex.test(formData.cid)) {
       setError('CID Number must be exactly 13 digits.');
       return;
     }
 
-    // 2. Password Validation: Min 8 chars, 1 uppercase (only if changing password)
     if (formData.newPassword) {
       const passwordRegex = /^(?=.*[A-Z]).{8,}$/;
       if (!passwordRegex.test(formData.newPassword)) {
         setError('New password must be at least 8 characters and include an uppercase letter.');
         return;
       }
-
       if (formData.newPassword !== formData.confirmPassword) {
         setError('New passwords do not match.');
         return;
       }
     }
 
-    // Success logic
-    setSuccess(true);
-    alert("Profile Updated Successfully!");
+    // --- 3. SAVE DATA TO SUPABASE ---
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) throw new Error("No user logged in");
+
+      const { error: dbError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          age: parseInt(formData.age),
+          cid: formData.cid,
+          updated_at: new Date()
+        });
+
+      if (dbError) throw dbError;
+
+      // Optional: Handle Password Change via Supabase Auth
+      if (formData.newPassword) {
+        const { error: authError } = await supabase.auth.updateUser({
+          password: formData.newPassword
+        });
+        if (authError) throw authError;
+      }
+
+      setSuccess(true);
+      alert("Profile Updated Successfully!");
+    } catch (err: any) {
+      setError(err.message);
+    }
   };
 
-  // Helper to update state
   const updateField = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
+
+  if (loading) return <div className="text-center mt-20">Loading profile...</div>;
 
   return (
     <div className="max-w-2xl mx-auto mt-10 bg-white p-8 rounded-xl shadow-lg border border-gray-100">
@@ -64,7 +128,6 @@ const Settings = () => {
         <p className="text-gray-500 text-sm">Manage your personal information and security</p>
       </div>
 
-      {/* Status Messages */}
       {error && (
         <div className="mb-6 p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg">
           {error}
@@ -82,6 +145,7 @@ const Settings = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
             <input 
               type="text" 
+              value={formData.firstName}
               className="w-full border p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" 
               onChange={(e) => updateField('firstName', e.target.value)}
             />
@@ -90,6 +154,7 @@ const Settings = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
             <input 
               type="text" 
+              value={formData.lastName}
               className="w-full border p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" 
               onChange={(e) => updateField('lastName', e.target.value)}
             />
@@ -99,6 +164,7 @@ const Settings = () => {
             <input 
               type="number" 
               min="18" 
+              value={formData.age}
               className="w-full border p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" 
               required 
               onChange={(e) => updateField('age', e.target.value)}
@@ -110,7 +176,6 @@ const Settings = () => {
               type="text" 
               placeholder="13-digit ID"
               value={formData.cid}
-              // Only allows numeric input
               onChange={(e) => updateField('cid', e.target.value.replace(/\D/g, ''))}
               maxLength={13}
               className="w-full border p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" 
@@ -124,13 +189,7 @@ const Settings = () => {
           <div className="space-y-4">
             <input 
               type="password" 
-              placeholder="Current Password" 
-              className="w-full border p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" 
-              onChange={(e) => updateField('currentPassword', e.target.value)}
-            />
-            <input 
-              type="password" 
-              placeholder="New Password (Min 8 chars, 1 Uppercase)" 
+              placeholder="New Password (Leave blank to keep current)" 
               className="w-full border p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" 
               onChange={(e) => updateField('newPassword', e.target.value)}
             />

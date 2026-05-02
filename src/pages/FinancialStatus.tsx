@@ -1,37 +1,71 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient'; // Make sure this path is correct
 
 const FinancialStatus = () => {
-  // 1. Initialize state with null or 0
+  // 1. Setup State to hold real data
   const [data, setData] = useState({ income: 0, expenses: 0, savings: 0 });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    // 2. Fetch data from your API endpoint
-    const fetchFinancialData = async () => {
+    const fetchFinances = async () => {
       try {
-        const response = await fetch('/api/user/financial-summary');
-        const result = await response.json();
-        setData(result);
+        setLoading(true);
+
+        // 2. Get the currently logged-in user
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (user) {
+          // 3. Fetch data from Supabase for this specific user
+          const { data: financeData, error: dbError } = await supabase
+            .from('finances')
+            .select('income, expenses, savings')
+            .eq('user_id', user.id)
+            .single(); // Get one row
+
+          if (dbError) throw dbError;
+          if (financeData) setData(financeData);
+        }
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
         setLoading(false);
-      } catch (error) {
-        console.error("Error fetching data:", error);
       }
     };
 
-    fetchFinancialData();
+    fetchFinances();
   }, []);
 
-  if (loading) return <div>Loading your finances...</div>;
+  if (loading) return <div className="p-8 text-center text-gray-500">Updating your balance...</div>;
 
   return (
     <div className="rounded-xl bg-white p-8 shadow-sm">
       <h1 className="text-2xl font-semibold">Financial Status</h1>
+      <p className="mt-4 text-gray-600">This page shows your current financial health from your account.</p>
+      
+      {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+
       <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-xl bg-slate-50 p-6 border">
-          <h2 className="font-semibold">Income</h2>
-          <p className="mt-2 text-xl">${data.income.toLocaleString()}</p>
+        <div className="rounded-xl bg-slate-50 p-6 border border-gray-100">
+          <h2 className="font-semibold text-gray-700">Income</h2>
+          <p className="mt-2 text-2xl font-bold text-green-600">
+            ${data.income.toLocaleString()}
+          </p>
         </div>
-        {/* Repeat for Expenses and Savings using data.expenses and data.savings */}
+        
+        <div className="rounded-xl bg-slate-50 p-6 border border-gray-100">
+          <h2 className="font-semibold text-gray-700">Expenses</h2>
+          <p className="mt-2 text-2xl font-bold text-red-600">
+            ${data.expenses.toLocaleString()}
+          </p>
+        </div>
+        
+        <div className="rounded-xl bg-slate-50 p-6 border border-gray-100">
+          <h2 className="font-semibold text-gray-700">Savings</h2>
+          <p className="mt-2 text-2xl font-bold text-blue-600">
+            ${data.savings.toLocaleString()}
+          </p>
+        </div>
       </div>
     </div>
   );
